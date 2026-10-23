@@ -1,0 +1,20 @@
+{
+  "name": "zcode-rtl-plugin",
+  "owner": {
+    "name": "nimaone"
+  },
+  "plugins": [
+    {
+      "name": "zcode-rtl",
+      "source": "./zcode-rtl",
+      "version": "0.3.2",
+      "description": "Persian RTL fix for the ZCode Desktop chat UI: auto-injects the direction fix (Persian RTL, code/Latin LTR) via the Chromium debug port at session start and on demand. Survives app updates because no app file is modified.",
+      "displayName": "ZCode RTL Fix",
+      "description_i18n": {
+        "fa": "فیکس راست‌چین (RTL) متن فارسی در رابط چت ZCode دسکتاپ: تزریق خودکار جهت متن از طریق پورت دیباگ کرومیوم در شروع هر session و در صورت درخواست. چون هیچ فایلی از خود اپ تغییر داده نمی‌شود، با آپدیت‌های ZCode از کار نمی‌افتد.",
+        "zh-CN": "ZCode 桌面版聊天界面的波斯语 RTL 修复：通过 Chromium 调试端口在会话开始时自动注入方向修复。"
+      },
+      "category": "productivity"
+    }
+  ]
+}
