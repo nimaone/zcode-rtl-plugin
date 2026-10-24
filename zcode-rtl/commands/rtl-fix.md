@@ -1,38 +1,52 @@
 ---
-description: Re-apply or diagnose the Persian RTL fix in the ZCode chat UI (inject via CDP)
+description: Toggle or diagnose the Persian RTL layer in the ZCode chat UI (on/off live, status, eval)
 ---
 
-Apply the Persian RTL fix to the ZCode Desktop chat UI, or diagnose it.
+Control the Persian RTL layer of the ZCode Desktop chat UI.
 
-The injector script lives at `C:\Users\nima\ZCodeProject\plugins\zcode-rtl\scripts\inject-rtl.mjs`
-(the plugin's stable source copy; `${CLAUDE_PLUGIN_ROOT}` is not expanded in commands).
-It requires ZCode to be running with `--remote-debugging-port=9222`, which the
-normal Start Menu shortcut already carries. Override the port with env `ZCODE_RTL_PORT`.
+Locate the injector inside this plugin's install cache:
+
+```
+~/.zcode/cli/plugins/cache/**/zcode-rtl/*/scripts/inject-rtl.mjs
+```
+
+(Windows: `C:\Users\<you>\.zcode\cli\plugins\cache\...` — pick the highest version folder.)
+It talks to the ZCode renderer over the Chromium DevTools Protocol on port 9222
+(env `ZCODE_RTL_PORT` overrides). The debug port is **off by default**; the RTL
+layer can be toggled live whenever the port is open.
 
 User arguments: "$ARGUMENTS"
 
-Steps:
+Semantics (pick by the arguments; default when empty or "apply"/"fix" is **on**):
 
-1. If the arguments mention `status`, run:
-   `node "C:/Users/nima/ZCodeProject/plugins/zcode-rtl/scripts/inject-rtl.mjs" --status`
-   and report whether the debug port is open and which page targets exist. Stop there.
+1. **`on`** — enable the RTL layer:
+   - Run: `node "<plugin>/scripts/inject-rtl.mjs" --set on`
+   - If it prints `RTL on: ... -> RTL_ENABLED`, done — Persian is RTL now. No restart happened.
+   - If it prints `PORT_CLOSED`, the debug server is off (the privacy default).
+     Start it with ONE app restart, then re-run `--set on`:
+     `powershell -NoProfile -ExecutionPolicy Bypass -File "<plugin>/scripts/restart-zcode.ps1"`
+     (gracefully closes and relaunches ZCode with `--remote-debugging-port=9222`;
+     the session is restored). After it comes back, re-run `--set on` or wait for
+     the SessionStart hook of the next session.
 
-2. If the arguments contain `eval` followed by a JS expression, run the script with
-   `--eval "<expression>"` and report the printed result. Useful for inspecting the
-   live DOM (class names) after a ZCode update changed the markup, e.g.:
+2. **`off`** — disable the RTL layer instantly (no app restart):
+   - Run: `node "<plugin>/scripts/inject-rtl.mjs" --set off`
+   - The renderer reloads clean with nothing injected. The debug port stays open.
+
+3. **`off hard`** — also close the debug server (back to the full privacy default):
+   - Run `--set off` first, then:
+     `powershell -NoProfile -ExecutionPolicy Bypass -File "<plugin>/scripts/restart-zcode.ps1" -NoPort`
+
+4. **`status`** — run with `--status` and report: port open/closed, page targets.
+
+5. **`eval <js>`** — run with `--eval "<expression>"` and report the printed result.
+   Useful after a ZCode update changed the DOM, e.g.:
    `--eval "JSON.stringify([...document.querySelectorAll('[class*=message i]')].slice(0,5).map(e=>e.className))"`
+   `--eval "window.__zcodeRtlProcess ? 'PAYLOAD_ACTIVE' : 'PAYLOAD_ABSENT'"`
 
-3. Otherwise (default, including "apply"/"fix"): run the injector one-shot:
-   `node "C:/Users/nima/ZCodeProject/plugins/zcode-rtl/scripts/inject-rtl.mjs" --verbose`
-
-   - If it reports `RTL injected: ...`, the fix is now live in the chat transcript.
-     Ask the user to confirm Persian messages render right-aligned RTL.
-   - If it reports the debug port is not reachable, tell the user to fully quit
-     ZCode (tray icon → Quit) and relaunch it from the normal shortcut — Electron
-     is single-instance, so a second launch cannot add the flag to the running
-     copy. Then retry this command.
-   - If it reports the payload threw an exception, the app update changed the DOM:
-     read `assets/zcode-rtl-fix.js` in the plugin source, fix the selectors/logic,
-     increment the version comment, and re-run the injector.
-
-Reply in the user's language (usually Persian).
+Notes for the agent:
+- The default bare `/rtl-fix` means **on** (step 1).
+- If the payload threw an exception during `--set on`, the app update changed the
+  DOM: read `assets/zcode-rtl-fix.js` in the same plugin folder, fix the
+  selectors/logic (SKILL.md has the repair playbook and a 3.16.x DOM map), then retry.
+- Reply in the user's language (often Persian).

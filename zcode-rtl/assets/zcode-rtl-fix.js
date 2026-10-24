@@ -1,5 +1,16 @@
 /*
- * ZCode RTL fix v28 — Persian RTL, English/code/tool blocks LTR.
+ * ZCode RTL fix v29 — Persian RTL, English/code/tool blocks LTR.
+ *
+ * v29 (toggle while working, debug port off by default):
+ *   - The payload now respects a persistent switch:
+ *     localStorage["zcodeRtl:enabled"] ('1' default, '0' = off).
+ *   - window.__zcodeRtlSetEnabled(true|false) flips it: enabling runs start()
+ *     immediately (no reload), disabling reloads the renderer — a clean page
+ *     with no auto re-injection stays off until re-enabled. Both are instant
+ *     and need no app restart; the app restart is only needed to OPEN or
+ *     CLOSE the debug port itself (Electron reads that flag at process start).
+ *   - When disabled at evaluation time, the payload exits without touching
+ *     anything — this is what makes "port open but RTL off" a stable state.
  *
  * v28 (user report + screenshot, confirmed live): Persian PROSE inside tool
  *   blocks (the expanded Thinking body) rendered broken-LTR because v27
@@ -91,7 +102,7 @@
  *   - sidebar (#sidebar, *sidebar*) -> COMPLETELY UNTOUCHED
  *   - debounced 200 ms rescan after streaming mutations
  */
-(function zcodeRtlFixV28() {
+(function zcodeRtlFixV29() {
   function force(el, props) {
     if (!el || el.nodeType !== 1) return;
     for (const k in props) el.style.setProperty(k, props[k], 'important');
@@ -527,7 +538,30 @@
       window.__zcodeRtlObserver = obs;
     }
 
-    console.log('[ZCode RTL v28] applied. Persian prose inside tool blocks (thinking body) now RTL; block chrome and layout stay LTR/left; sidebar untouched.');
+    console.log('[ZCode RTL v29] applied. Toggle: /rtl-fix off|on (instant) — window.__zcodeRtlSetEnabled(bool). Persian RTL; tool-block chrome LTR with Persian prose RTL inside; sidebar untouched.');
+  }
+
+  // v29: persistent on/off switch. '0' in localStorage disables the layer
+  // completely; enabling again is instant (start() without a reload).
+  const LS_KEY = 'zcodeRtl:enabled';
+  function rtlEnabled() {
+    try { return localStorage.getItem(LS_KEY) !== '0'; } catch (e) { return true; }
+  }
+  window.__zcodeRtlSetEnabled = function (v) {
+    try { localStorage.setItem(LS_KEY, v ? '1' : '0'); } catch (e) { /* storage blocked */ }
+    if (v) {
+      if (!window.__zcodeRtlObserver) start();
+      console.log('[ZCode RTL v29] enabled.');
+    } else {
+      // Clean slate: a fresh renderer has none of our inline styles and no
+      // observer, and nothing re-injects until the payload is evaluated again.
+      location.reload();
+    }
+  };
+
+  if (!rtlEnabled()) {
+    console.log('[ZCode RTL v29] disabled (localStorage zcodeRtl:enabled=0). Enable with window.__zcodeRtlSetEnabled(true) or /rtl-fix on.');
+    return;
   }
 
   if (document.body) {

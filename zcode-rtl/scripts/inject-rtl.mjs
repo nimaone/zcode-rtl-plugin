@@ -40,6 +40,8 @@ const WATCH = args.includes('--watch');
 const STATUS = args.includes('--status');
 const QUIET = args.includes('--quiet');
 const VERBOSE = args.includes('--verbose');
+const setIdx = args.indexOf('--set');
+const SET = setIdx >= 0 ? args[setIdx + 1] : null; // 'on' | 'off'
 const evalIdx = args.indexOf('--eval');
 const EVAL = evalIdx >= 0 ? args[evalIdx + 1] : null;
 
@@ -163,13 +165,45 @@ async function watchLoop() {
 }
 
 async function main() {
+  if (SET) {
+    // Toggle the RTL layer in-page. Instant, no app restart. The app restart
+    // is only involved when the debug port itself must open (Electron reads
+    // that flag only at process start) — the command file handles that case.
+    if (SET !== 'on' && SET !== 'off') {
+      console.log("usage: --set on|off");
+      process.exitCode = 1;
+      return;
+    }
+    let targets;
+    try {
+      targets = await listTargets();
+    } catch (e) {
+      if (SET === 'off') {
+        console.log('RTL already fully off: the debug port is closed, so nothing is injected anywhere.');
+      } else {
+        console.log('PORT_CLOSED: to enable RTL, ZCode must be restarted with --remote-debugging-port=' + PORT + '. Run: powershell -File "<plugin>/scripts/restart-zcode.ps1"  (then start a new session or run /rtl-fix on again)');
+      }
+      return;
+    }
+    const payload = readFileSync(PAYLOAD_PATH, 'utf8');
+    for (const t of targets) {
+      const expr = SET === 'off'
+        ? "try{localStorage.setItem('zcodeRtl:enabled','0')}catch(e){}; location.reload(); 'RTL_OFF_RELOADING'"
+        : "try{localStorage.setItem('zcodeRtl:enabled','1')}catch(e){}; 'RTL_ON'"
+          + ';' + payload + '; window.__zcodeRtlProcess ? "RTL_ENABLED" : "RTL_FAILED"';
+      const out = await evalIn(t, expr);
+      console.log(`${SET === 'off' ? 'RTL off' : 'RTL on'}: ${t.title || t.url} -> ${out}`);
+    }
+    return;
+  }
+
   if (STATUS) {
     let targets;
     try {
       targets = await listTargets();
     } catch (e) {
       console.log(`port ${PORT}: CLOSED (${e.message})`);
-      console.log('Start ZCode with --remote-debugging-port=9222 (patch the Start Menu shortcut once — see the plugin README).');
+      console.log(`port ${PORT}: CLOSED (default-off). Run /rtl-fix on to enable RTL — it will restart ZCode with the port via scripts/restart-zcode.ps1.`);
       return;
     }
     console.log(`port ${PORT}: OPEN, ${targets.length} page target(s)`);
@@ -218,9 +252,12 @@ async function main() {
 
 main().catch((e) => {
   if (isPortError(e)) {
-    // Expected state when the app was not launched with the debug port.
-    // Say it on stdout (hook stdout becomes session context) and exit clean.
-    console.log(`[zcode-rtl] NOT APPLIED: debug port ${PORT} is closed. Fully quit ZCode and relaunch it from its normal shortcut (it must carry --remote-debugging-port=9222 — see the plugin README), then run /rtl-fix.`);
+    // Expected state when the app was launched without the debug flag —
+    // the default (privacy) setup. With --quiet (hook use) say nothing;
+    // otherwise tell the user how to turn the layer on.
+    if (!QUIET) {
+      console.log(`[zcode-rtl] NOT APPLIED: debug port ${PORT} is closed (default-off). Run /rtl-fix on to enable RTL (first enable restarts ZCode with the port), or /rtl-fix status for details.`);
+    }
     process.exit(0);
   }
   err(`[zcode-rtl] ${e.stack || e.message || e}`);

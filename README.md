@@ -6,7 +6,13 @@
 
 **ZCode Desktop** (the free AI coding app from Z.ai) renders Persian chat text left-aligned with broken word order. The app has no RTL option, and its plugin system officially cannot restyle the host UI — so this plugin takes the reliable route: it injects a battle-tested direction fix into the running app through Chromium's standard DevTools Protocol (CDP). **No ZCode file is ever modified**, which is why the fix keeps working across app updates.
 
-**Architecture (simple by design):** no launcher scripts, no desktop icons, no background processes. ZCode starts once with a debug-port flag (one-time tweak of your existing shortcut), and a plugin hook silently re-applies the fix at the start of every session.
+**Design goals (v0.4.0):**
+
+- **Privacy by default** — the debug server is **off**. Your normal ZCode shortcut stays untouched; no permanent flags, no background processes, no launcher icons.
+- **Live toggle** — while the port is open, `/rtl-fix off` and `/rtl-fix on` switch the RTL layer instantly. No app restart.
+- **One honest limitation** — Chromium only reads `--remote-debugging-port` at process start, so going from *port closed* to *port open* costs exactly one app restart (handled automatically for you by `/rtl-fix on`).
+
+> Why not like the DSH Arabic/Rastin plugins, which need none of this? Those target DeepSeek Harness, whose plugin API exposes official UI-injection hooks (`webserver/index-inject`, style seats). ZCode (as of 3.16.x) exposes no such extension point — its plugin system is agent-only — so a CDP bridge is the only reliable vector. If ZCode ever adds an official injection hook, this plugin can drop the port entirely.
 
 ## What you get
 
@@ -26,7 +32,7 @@ The payload self-heals while the model is streaming (debounced 200 ms rescan), s
 - **ZCode Desktop** (Windows instructions below; the injector itself also works on macOS/Linux — see [Manual setup](#manual-setup))
 - **Node.js ≥ 22** (`node --version` to check)
 
-## Installation (3 steps)
+## Installation (2 steps)
 
 ### 1. Add this repo as a plugin marketplace
 
@@ -40,55 +46,54 @@ https://github.com/nimaone/zcode-rtl-plugin
 
 Open the marketplace you just added (**Personal** tab), find **ZCode RTL Fix**, press **Install**. You should see it under **Settings → Plugin Management → Installed**.
 
-### 3. One-time: start ZCode with the debug port
+Done. Nothing listens, nothing runs — you installed a switch, and it's off.
 
-The injection needs the app to run with `--remote-debugging-port=9222`. Easiest way — patch your existing ZCode shortcut once (PowerShell):
+## Turning RTL on and off
 
-```powershell
-$sh = New-Object -ComObject WScript.Shell
-$lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\ZCode.lnk"
-$s = $sh.CreateShortcut($lnk)
-if ($s.Arguments -notlike '*remote-debugging-port*') { $s.Arguments = ($s.Arguments.Trim() + ' --remote-debugging-port=9222').Trim(); $s.Save() }
-```
+Type `/rtl-fix` in the ZCode chat (the plugin ships this slash command):
 
-(or manually: right-click the ZCode shortcut → **Properties** → append ` --remote-debugging-port=9222` to the **Target** field.)
+| Command | What happens |
+|---|---|
+| `/rtl-fix on` | Enables the RTL layer **live**. If the debug port is still closed (your first time), it restarts ZCode once with the port via the bundled `restart-zcode.ps1` — your session is restored — then enables it. |
+| `/rtl-fix off` | Disables the RTL layer **instantly** (the page reloads clean). The port stays open. |
+| `/rtl-fix off hard` | Also closes the debug server — back to the full privacy default (one restart). |
+| `/rtl-fix status` | Reports: port open/closed, page targets, payload state. |
 
-Then fully quit ZCode (tray icon → Quit) and start it again from that same shortcut. From now on, every session gets the fix injected automatically by the SessionStart hook — nothing else to run, ever.
+Under the hood the toggle is `localStorage["zcodeRtl:enabled"]` plus an in-page switch (`window.__zcodeRtlSetEnabled(true|false)`), so it survives page reloads and needs no app restart — except the single restart that opens the port the first time.
 
-That's it — Persian messages now render RTL.
-
-## Daily use
-
-- **/rtl-fix** — slash command inside ZCode: re-applies the fix or prints a status report.
-- **After a ZCode update** — if the layout looks wrong again, just run `/rtl-fix`. If the update changed the app's DOM class names, ask your ZCode agent to update the selectors in `assets/zcode-rtl-fix.js` (the bundled `zcode-rtl` skill contains a repair playbook, including a map of the current DOM structure).
+Your ZCode shortcuts are never modified. If you prefer the *always-on* style instead, you can add ` --remote-debugging-port=9222` to your ZCode shortcut's Target once — then RTL comes back automatically in every new session via the SessionStart hook.
 
 ## Manual setup
 
 Any platform:
 
 ```bash
-# start ZCode with the debug port (quit it first)
+# quit ZCode, then start it with the port
 zcode --remote-debugging-port=9222 &        # or the full path to the binary
 
-# the SessionStart hook injects automatically; for a manual one-shot:
-node <plugin-folder>/scripts/inject-rtl.mjs
-```
+# live toggle
+node <plugin-folder>/scripts/inject-rtl.mjs --set on
+node <plugin-folder>/scripts/inject-rtl.mjs --set off
 
-Check state with `--status`, poke the live DOM with `--eval "<js>"`, add `--verbose` for logs, or run `--watch` to keep a persistent injector alive across renderer reloads (not required for the hook-based setup).
+# diagnostics
+node <plugin-folder>/scripts/inject-rtl.mjs --status
+node <plugin-folder>/scripts/inject-rtl.mjs --eval "window.__zcodeRtlProcess ? 'ACTIVE' : 'ABSENT'"
+```
 
 ## How it works (in one paragraph)
 
 `scripts/inject-rtl.mjs` is a zero-dependency Node CDP client. It finds every renderer page via `http://127.0.0.1:9222/json/list`, connects over WebSocket and evaluates `assets/zcode-rtl-fix.js` in the page. The payload assigns per-element direction: Persian-dominant leaves get `direction: rtl; unicode-bidi: embed`, Latin runs and code stay LTR, the sidebar and tool-block chrome are explicitly excluded, and a `MutationObserver` re-processes streamed nodes. Because it only touches live style, it never modifies the app on disk.
 
-**Privacy/security note:** the debug port binds to `127.0.0.1` only and is reachable from your machine only. Don't forward it. This is a user-side style injection, not an app modification.
+**Privacy/security note:** the debug port binds to `127.0.0.1` only and is reachable from your machine only. Don't forward it. It is closed unless you explicitly turn RTL on. This is a user-side style injection, not an app modification.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `/rtl-fix` says the port is closed | ZCode is running without the flag: fully quit (tray → Quit) and relaunch from the patched shortcut |
-| Persian still LTR after relaunch | Run `/rtl-fix` once — the SessionStart hook may have run before the window opened |
-| Layout broke after a ZCode update | `/rtl-fix`; if still broken, the DOM changed — update the payload selectors (see the skill) |
+| `/rtl-fix on` says `PORT_CLOSED` | Expected on first enable — the command itself runs `restart-zcode.ps1` (one restart), then re-run `/rtl-fix on` |
+| Persian still LTR right after enabling | The page may still be restoring — run `/rtl-fix on` once more or start a new message |
+| Layout broke after a ZCode update | `/rtl-fix on`; if still broken, the DOM changed — update the payload selectors (see the bundled skill) |
+| Want it gone completely | `/rtl-fix off hard` |
 
 ## License
 
