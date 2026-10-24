@@ -18,9 +18,11 @@
  *   --quiet           suppress errors when the debug port is closed (hook use)
  *   --verbose         log to stderr
  *
- * Requires the app to run with --remote-debugging-port=<port> — use the
- * "ZCode (RTL)" desktop shortcut (see scripts/rtl-launcher.vbs). The port
- * binds to 127.0.0.1 only, so nothing outside this machine can connect.
+ * Requires the app to run with --remote-debugging-port=<port>. The user's
+ * normal ZCode shortcut (Start Menu) carries the flag — a one-time patch,
+ * everything after that (injection at session start) runs through the
+ * plugin hook in the background. The port binds to 127.0.0.1 only, so
+ * nothing outside this machine can connect.
  *
  * Port: env ZCODE_RTL_PORT, default 9222. Node >= 22 (global WebSocket+fetch).
  */
@@ -167,7 +169,7 @@ async function main() {
       targets = await listTargets();
     } catch (e) {
       console.log(`port ${PORT}: CLOSED (${e.message})`);
-      console.log('Start ZCode with the "ZCode (RTL)" shortcut so the debug port opens.');
+      console.log('Start ZCode with --remote-debugging-port=9222 (patch the Start Menu shortcut once — see the plugin README).');
       return;
     }
     console.log(`port ${PORT}: OPEN, ${targets.length} page target(s)`);
@@ -216,9 +218,9 @@ async function main() {
 
 main().catch((e) => {
   if (isPortError(e)) {
-    // Expected state when the app was not launched via the RTL shortcut.
+    // Expected state when the app was not launched with the debug port.
     // Say it on stdout (hook stdout becomes session context) and exit clean.
-    console.log(`[zcode-rtl] NOT APPLIED: debug port ${PORT} is closed. Fully quit ZCode and start it via the "ZCode (RTL)" desktop shortcut, then run /rtl-fix.`);
+    console.log(`[zcode-rtl] NOT APPLIED: debug port ${PORT} is closed. Fully quit ZCode and relaunch it from its normal shortcut (it must carry --remote-debugging-port=9222 — see the plugin README), then run /rtl-fix.`);
     process.exit(0);
   }
   err(`[zcode-rtl] ${e.stack || e.message || e}`);

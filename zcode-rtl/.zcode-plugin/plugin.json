@@ -1,12 +1,10 @@
 {
   "name": "zcode-rtl",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Persian RTL fix for the ZCode Desktop chat UI: auto-injects the direction fix (Persian RTL, code/Latin LTR) via the Chromium debug port at session start and on demand. Survives app updates because no app file is modified.",
-  "author": { "name": "nimaone", "url": "https://github.com/nimaone" },
-  "homepage": "https://github.com/nimaone/zcode-rtl-plugin",
-  "repository": "https://github.com/nimaone/zcode-rtl-plugin",
-  "license": "MIT",
-  "keywords": ["zcode", "rtl", "persian", "farsi", "direction", "ui"],
+  "author": {
+    "name": "nima"
+  },
   "skills": "skills",
   "commands": "commands"
 }

@@ -7,7 +7,7 @@
     {
       "name": "zcode-rtl",
       "source": "./zcode-rtl",
-      "version": "0.3.2",
+      "version": "0.3.3",
       "description": "Persian RTL fix for the ZCode Desktop chat UI: auto-injects the direction fix (Persian RTL, code/Latin LTR) via the Chromium debug port at session start and on demand. Survives app updates because no app file is modified.",
       "displayName": "ZCode RTL Fix",
       "description_i18n": {
