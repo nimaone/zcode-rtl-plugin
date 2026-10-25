@@ -4,7 +4,7 @@
 # restart ZCode, and the agent lives inside ZCode.
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('enable', 'disable')]
+  [ValidateSet('enable', 'disable', 'restart')]
   [string]$Mode
 )
 $ErrorActionPreference = "SilentlyContinue"
@@ -16,6 +16,13 @@ function Test-Port([int]$p) {
   $ok = $c.ConnectAsync("127.0.0.1", $p).Wait(500)
   $c.Close()
   return [bool]$ok
+}
+
+if ($Mode -eq 'restart') {
+  # Bare restart with the port — used by the heartbeat daemon (which handles
+  # injection itself on a later tick).
+  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'restart-zcode.ps1')
+  exit 0
 }
 
 if ($Mode -eq 'enable') {

@@ -31,7 +31,6 @@ import { homedir } from 'node:os';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CONFIG = join(homedir(), '.zcode', 'cli', 'config.json');
 const INJECT = join(HERE, 'inject-rtl.mjs');
-const RESTART_PS1 = join(HERE, 'restart-zcode.ps1');
 const CDP = 'http://127.0.0.1:9222';
 const MUTEX_PORT = 9223;
 const TICK_MS = 3000;
@@ -39,7 +38,12 @@ const RESTART_COOLDOWN_MS = 60000;
 
 const log = (...a) => console.error('[rtl-heartbeat]', new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const run = (cmd, args) => spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true }).unref();
+const run = (cmd, args) => {
+  const c = spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true });
+  // A spawn 'error' (ENOENT, ...) crashes the daemon if nobody listens.
+  c.on('error', (e) => log('spawn failed:', cmd, e.message || e));
+  c.unref();
+};
 
 function daemonize() {
   if (process.argv.includes('--daemon')) return;
@@ -136,9 +140,10 @@ async function tick() {
     // Toggle is ON but this ZCode instance has no debug port (e.g. first run
     // after a reboot without the always-on shortcut): restart it once with
     // the port. Never fires when the user simply quit the app.
+    // Goes through wscript (GUI subsystem) — guaranteed zero windows.
     log('toggle on but no debug port — restarting ZCode with the port (once, invisibly)');
     lastRestart = Date.now();
-    run('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', RESTART_PS1]);
+    run('wscript.exe', [join(HERE, 'rtl-bg.vbs'), 'restart']);
   }
 
   lastEnabled = enabled;
