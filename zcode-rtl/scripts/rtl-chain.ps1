@@ -26,9 +26,14 @@ if ($Mode -eq 'enable') {
       Start-Sleep -Seconds 1
       if (Test-Port $port) { break }
     }
-    Start-Sleep -Seconds 5   # let the renderer settle
   }
-  & node (Join-Path $dir 'inject-rtl.mjs') --set on
+  # The browser endpoint opens BEFORE the page target is listed, and the
+  # renderer may still be restoring — retry until the layer is really on.
+  for ($i = 0; $i -lt 12; $i++) {
+    Start-Sleep -Seconds 3
+    $out = & node (Join-Path $dir 'inject-rtl.mjs') --set on 2>&1 | Out-String
+    if ($out -match 'RTL_ENABLED') { break }
+  }
 } else {
   # pause the layer now (instant if the port is open), then restart
   # ZCode once WITHOUT the port — the full privacy default.

@@ -177,6 +177,12 @@ async function main() {
     let targets;
     try {
       targets = await listTargets();
+      // The browser endpoint opens before the first page target is listed —
+      // wait for the renderer instead of silently doing nothing.
+      for (let i = 0; i < 10 && targets.length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        targets = await listTargets();
+      }
     } catch (e) {
       if (SET === 'off') {
         console.log('RTL already fully off: the debug port is closed, so nothing is injected anywhere.');
