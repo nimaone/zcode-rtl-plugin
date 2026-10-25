@@ -21,7 +21,7 @@
  * harmless. Reads config.json every tick; talks CDP only when a transition
  * is needed (all page work is delegated to inject-rtl.mjs).
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, appendFileSync, statSync, existsSync, truncateSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { execSync, spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -35,8 +35,16 @@ const CDP = 'http://127.0.0.1:9222';
 const MUTEX_PORT = 9223;
 const TICK_MS = 3000;
 const RESTART_COOLDOWN_MS = 60000;
+const LOGFILE = join(homedir(), '.zcode', 'rtl-heartbeat.log');
 
-const log = (...a) => console.error('[rtl-heartbeat]', new Date().toISOString(), ...a);
+const log = (...a) => {
+  const line = `[rtl-heartbeat] ${new Date().toISOString()} ${a.join(' ')}`;
+  console.error(line);
+  try {
+    if (existsSync(LOGFILE) && statSync(LOGFILE).size > 100000) truncateSync(LOGFILE);
+    appendFileSync(LOGFILE, line + '\n');
+  } catch { /* logging must never break the daemon */ }
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const run = (cmd, args) => {
   const c = spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true });
