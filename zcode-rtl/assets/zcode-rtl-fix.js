@@ -1,5 +1,12 @@
 /*
- * ZCode RTL fix v29 — Persian RTL, English/code/tool blocks LTR.
+ * ZCode RTL fix v30 — Persian RTL, English/code/tool blocks LTR.
+ *
+ * v30 (reload-free OFF): the payload now records every element+property it
+ *   touches (TOUCHED map). Disabling via window.__zcodeRtlSetEnabled(false)
+ *   removes exactly those inline styles and disconnects the observer — the
+ *   page is NOT reloaded any more, so toggling OFF no longer blinks the app.
+ *   A stale observer from a previous payload evaluation is disconnected and
+ *   replaced at (re)inject time so the newest closure always owns cleanup.
  *
  * v29 (toggle while working, debug port off by default):
  *   - The payload now respects a persistent switch:
@@ -102,10 +109,18 @@
  *   - sidebar (#sidebar, *sidebar*) -> COMPLETELY UNTOUCHED
  *   - debounced 200 ms rescan after streaming mutations
  */
-(function zcodeRtlFixV29() {
+(function zcodeRtlFixV30() {
+  // Every element+property we set, so disable() can strip them without a
+  // page reload (v30).
+  const TOUCHED = new Map();
   function force(el, props) {
     if (!el || el.nodeType !== 1) return;
-    for (const k in props) el.style.setProperty(k, props[k], 'important');
+    let rec = TOUCHED.get(el);
+    if (!rec) { rec = new Set(); TOUCHED.set(el, rec); }
+    for (const k in props) {
+      rec.add(k);
+      el.style.setProperty(k, props[k], 'important');
+    }
   }
 
   // Persian/Arabic detection: Arabic block + supplements + presentation forms.
@@ -538,24 +553,40 @@
       window.__zcodeRtlObserver = obs;
     }
 
-    console.log('[ZCode RTL v29] applied. Toggle: /rtl-fix off|on (instant) — window.__zcodeRtlSetEnabled(bool). Persian RTL; tool-block chrome LTR with Persian prose RTL inside; sidebar untouched.');
+    console.log('[ZCode RTL v30] applied. Persian RTL; tool-block chrome LTR with Persian prose RTL inside; sidebar untouched. Toggle is reload-free both ways.');
   }
 
-  // v29: persistent on/off switch. '0' in localStorage disables the layer
-  // completely; enabling again is instant (start() without a reload).
+  // v29: persistent on/off switch. '0' in localStorage disables the layer.
+  // v30: disabling strips exactly the styles we set — no page reload.
   const LS_KEY = 'zcodeRtl:enabled';
   function rtlEnabled() {
     try { return localStorage.getItem(LS_KEY) !== '0'; } catch (e) { return true; }
+  }
+  function stripAll() {
+    for (const [el, props] of TOUCHED) {
+      try {
+        for (const k of props) el.style.removeProperty(k);
+        if (el.style && el.style.length === 0) el.removeAttribute('style');
+      } catch (e) { /* detached node — ignore */ }
+    }
+    TOUCHED.clear();
+  }
+  function stopObserver() {
+    if (window.__zcodeRtlObserver) {
+      try { window.__zcodeRtlObserver.disconnect(); } catch (e) { /* noop */ }
+      window.__zcodeRtlObserver = null;
+    }
   }
   window.__zcodeRtlSetEnabled = function (v) {
     try { localStorage.setItem(LS_KEY, v ? '1' : '0'); } catch (e) { /* storage blocked */ }
     if (v) {
       if (!window.__zcodeRtlObserver) start();
-      console.log('[ZCode RTL v29] enabled.');
+      console.log('[ZCode RTL v30] enabled.');
     } else {
-      // Clean slate: a fresh renderer has none of our inline styles and no
-      // observer, and nothing re-injects until the payload is evaluated again.
-      location.reload();
+      try { stripAll(); } catch (e) { /* nothing touched */ }
+      stopObserver();
+      window.__zcodeRtlProcess = null;
+      console.log('[ZCode RTL v30] disabled — styles stripped, no reload.');
     }
   };
 
@@ -565,6 +596,7 @@
   }
 
   if (document.body) {
+    stopObserver(); // a previous evaluation's closure must not survive (v30)
     start();
   } else {
     document.addEventListener('DOMContentLoaded', function () {

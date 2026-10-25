@@ -194,7 +194,9 @@ async function main() {
     const payload = readFileSync(PAYLOAD_PATH, 'utf8');
     for (const t of targets) {
       const expr = SET === 'off'
-        ? "try{localStorage.setItem('zcodeRtl:enabled','0')}catch(e){}; location.reload(); 'RTL_OFF_RELOADING'"
+        // v30 payload strips its styles live (no reload); older payloads
+        // fall back to the reload path.
+        ? "(window.__zcodeRtlSetEnabled ? (window.__zcodeRtlSetEnabled(false), 'RTL_OFF_LIVE') : (function(){try{localStorage.setItem('zcodeRtl:enabled','0')}catch(e){}; location.reload(); return 'RTL_OFF_RELOADING';})())"
         : "try{localStorage.setItem('zcodeRtl:enabled','1')}catch(e){}; 'RTL_ON'"
           + ';' + payload + '; window.__zcodeRtlProcess ? "RTL_ENABLED" : "RTL_FAILED"';
       const out = await evalIn(t, expr);
