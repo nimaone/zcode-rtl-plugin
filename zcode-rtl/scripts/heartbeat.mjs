@@ -111,7 +111,9 @@ function readFlag(file) {
     const eps = p.enabledPlugins || {};
     const hits = Object.entries(eps).filter(([k]) => k.startsWith('zcode-rtl@'));
     if (!hits.length) return null;
-    return hits.some(([, v]) => v === true);
+    // A stale second entry (an old marketplace id) may still say true —
+    // an explicit false for any zcode-rtl@ plugin id must win.
+    return hits.every(([, v]) => v !== false);
   } catch {
     return null;
   }
