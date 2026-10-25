@@ -4,6 +4,13 @@ description: Toggle or diagnose the Persian RTL layer in the ZCode chat UI (on/o
 
 Control the Persian RTL layer of the ZCode Desktop chat UI.
 
+**Since v0.5.0 the Plugin Management toggle is a LIVE master switch**: a
+background heartbeat (spawned by the SessionStart hook, singleton) watches
+`~/.zcode/cli/config.json` every ~3 s and applies/strips the RTL layer in the
+running renderer when the user flips the plugin toggle. Toggling ON with the
+debug port closed even restarts ZCode once invisibly (only while a ZCode
+process exists). `/rtl-fix` remains for quick manual control and diagnostics.
+
 Locate the plugin's scripts folder (the install cache is the reliable place):
 
 ```

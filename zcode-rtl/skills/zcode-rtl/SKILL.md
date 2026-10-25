@@ -29,9 +29,13 @@ the payload's selectors need a tweak.
   - `--status`: port + target report
   - `--eval "<expr>"`: run JS in the page and print the result (diagnostics)
   - `--quiet` for hook use; env `ZCODE_RTL_PORT` (default 9222)
-- `hooks/hooks.json` — SessionStart hook runs the injector quietly. With the
-  port closed (the default) it is a silent no-op; when open, every new
-  session gets the fix.
+- `hooks/hooks.json` — SessionStart hook spawns `scripts/heartbeat.mjs`
+  (detached, singleton via mutex port 9223, silent when the plugin toggle is
+  off). The heartbeat polls `plugins.enabledPlugins` in `~/.zcode/cli/config.json`
+  every ~3 s: a toggle edge syncs the in-page switch and applies/strips the
+  RTL layer live (toggle ON with the port closed restarts ZCode once with the
+  port — only while a ZCode process exists). Between toggle edges the in-page
+  manual switch (`/rtl-fix off`) is respected.
 - `scripts/restart-zcode.ps1` — on-demand helper (auto-detects ZCode.exe):
   restart WITH the port (`/rtl-fix on` when port closed) or with `-NoPort`
   (full off). The user's shortcuts stay vanilla — no permanent flag.

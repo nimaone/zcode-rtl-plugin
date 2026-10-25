@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/inject-rtl.mjs\" --quiet",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.mjs\"",
             "async": true
           }
         ]
