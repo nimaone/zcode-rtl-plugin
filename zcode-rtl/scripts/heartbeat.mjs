@@ -36,6 +36,10 @@ const MUTEX_PORT = 9223;
 const TICK_MS = 3000;
 const RESTART_COOLDOWN_MS = 60000;
 const LOGFILE = join(homedir(), '.zcode', 'rtl-heartbeat.log');
+// The Plugin Management toggle writes to the WORKSPACE scope config when a
+// project is open (user-scope only when none) — watch both and AND them,
+// matching ZCode's own resolution (any scope saying false wins).
+let WORKSPACE = '';
 
 const log = (...a) => {
   const line = `[rtl-heartbeat] ${new Date().toISOString()} ${a.join(' ')}`;
@@ -53,9 +57,36 @@ const run = (cmd, args) => {
   c.unref();
 };
 
-function daemonize() {
-  if (process.argv.includes('--daemon')) return;
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--daemon'], {
+function hookStdinPayload() {
+  // SessionStart hooks receive a JSON payload on stdin (cwd/workspace).
+  // Race with a timer so a missing/interactive stdin can never hang us.
+  if (process.stdin.isTTY) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 1500);
+    let raw = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (c) => (raw += c));
+    process.stdin.on('end', () => {
+      clearTimeout(timer);
+      try { resolve(JSON.parse(raw)); } catch { resolve(null); }
+    });
+    process.stdin.on('error', () => { clearTimeout(timer); resolve(null); });
+  });
+}
+
+async function daemonize() {
+  if (process.argv.includes('--daemon')) {
+    const wi = process.argv.indexOf('--workspace');
+    if (wi >= 0 && process.argv[wi + 1]) WORKSPACE = process.argv[wi + 1];
+    return;
+  }
+  // Hook / manual entry: figure out the active workspace, then detach.
+  const payload = await hookStdinPayload();
+  const ws = process.argv[process.argv.indexOf('--workspace') + 1]
+    || payload?.cwd || payload?.workspace || '';
+  const args = [fileURLToPath(import.meta.url), '--daemon'];
+  if (ws) args.push('--workspace', ws);
+  const child = spawn(process.execPath, args, {
     detached: true, stdio: 'ignore', windowsHide: true,
   });
   child.unref();
@@ -71,14 +102,32 @@ function mutex() {
   });
 }
 
-function readEnabled() {
+function readFlag(file) {
+  // null = not configured in this scope; else true/false
   try {
-    const cfg = JSON.parse(readFileSync(CONFIG, 'utf8'));
-    const eps = (cfg.plugins && cfg.plugins.enabledPlugins) || {};
-    return Object.entries(eps).some(([k, v]) => k.startsWith('zcode-rtl@') && v === true);
+    const cfg = JSON.parse(readFileSync(file, 'utf8'));
+    const p = (cfg && cfg.plugins) || {};
+    if (p.enabled === false) return false; // global kill switch
+    const eps = p.enabledPlugins || {};
+    const hits = Object.entries(eps).filter(([k]) => k.startsWith('zcode-rtl@'));
+    if (!hits.length) return null;
+    return hits.some(([, v]) => v === true);
   } catch {
-    return null; // unreadable (mid-write) — treat as "no change this tick"
+    return null;
   }
+}
+
+function readEnabled() {
+  // Effective state = user scope AND workspace scope (ZCode ANDs scopes;
+  // any scope explicitly saying false disables the plugin).
+  const u = readFlag(CONFIG);
+  if (u === false) return false;
+  if (WORKSPACE) {
+    const w = readFlag(join(WORKSPACE, '.zcode', 'config.json'));
+    if (w === false) return false;
+    if (w === true) return u !== false; // true in workspace, user unset/true
+  }
+  return u !== false; // both unset -> default enabled
 }
 
 function zcodeProcessExists() {
@@ -157,10 +206,11 @@ async function tick() {
   lastEnabled = enabled;
 }
 
-daemonize();
-if (!(await mutex())) process.exit(0); // an instance is already watching
-log(`watching ${CONFIG} (port ${MUTEX_PORT} mutex)`);
-for (;;) {
-  try { await tick(); } catch (e) { log('tick error:', e.message || e); }
-  await sleep(TICK_MS);
-}
+daemonize().then(() => mutex()).then(async (acquired) => {
+  if (!acquired) process.exit(0); // an instance is already watching
+  log(`watching ${CONFIG}${WORKSPACE ? ' + workspace ' + WORKSPACE : ''} (port ${MUTEX_PORT} mutex)`);
+  for (;;) {
+    try { await tick(); } catch (e) { log('tick error:', e.message || e); }
+    await sleep(TICK_MS);
+  }
+});

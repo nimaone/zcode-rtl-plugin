@@ -1,6 +1,6 @@
 {
   "name": "zcode-rtl",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Persian RTL fix for the ZCode Desktop chat UI. The Plugin Management toggle is a LIVE master switch (a background heartbeat applies/strips the fix in real time). Falls back to /rtl-fix on|off. Survives app updates — no app file is modified.",
   "author": {
     "name": "nima"
