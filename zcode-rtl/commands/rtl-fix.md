@@ -26,16 +26,20 @@ Pick the branch (default when arguments are empty or say "apply"/"fix" → **on*
 1. **`on`** — enable the RTL layer:
    - Run: `node "<S>/inject-rtl.mjs" --set on`
    - `RTL on: ... -> RTL_ENABLED` → done, no restart happened. Report success.
-   - `PORT_CLOSED` → run: `"<S>/enable-rtl.cmd"` (it returns immediately and
-     schedules: one ZCode restart with the port in ~20s, then auto-enable).
-     Tell the user the app will blink once and RTL comes back on by itself.
+   - `PORT_CLOSED` → run: `wscript.exe "<S>/rtl-bg.vbs" enable` — fully
+     invisible background chain: returns immediately, restarts ZCode once
+     with the port (~20 s), then enables RTL automatically. Tell the user the
+     app will blink once and RTL comes back on by itself. NEVER call
+     `restart-zcode.ps1` synchronously from the session (it kills this app
+     and the session with it) and never use `start`/`cmd /c start` (opens a
+     visible console window).
 
 2. **`off`** — pause the RTL layer instantly (port stays open):
    - Run: `node "<S>/inject-rtl.mjs" --set off`
 
 3. **`off hard`** (or `default`) — full privacy default:
-   - Run: `"<S>/disable-rtl.cmd"` — pauses the layer now and restarts ZCode
-     without the debug port (~20s, detached).
+   - Run: `wscript.exe "<S>/rtl-bg.vbs" disable` — pauses the layer now and
+     restarts ZCode without the debug port (~20 s, invisible background).
 
 4. **`always-on`** (or `boot`) — make every future app start come up with RTL:
    - Patch the user's own Start Menu shortcut once:
