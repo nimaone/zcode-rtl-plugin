@@ -1,52 +1,64 @@
 ---
-description: Toggle or diagnose the Persian RTL layer in the ZCode chat UI (on/off live, status, eval)
+description: Toggle or diagnose the Persian RTL layer in the ZCode chat UI (on/off live, always-on boot mode, status, eval)
 ---
 
 Control the Persian RTL layer of the ZCode Desktop chat UI.
 
-Locate the injector inside this plugin's install cache:
+Locate the plugin's scripts folder (the install cache is the reliable place):
 
 ```
-~/.zcode/cli/plugins/cache/**/zcode-rtl/*/scripts/inject-rtl.mjs
+~/.zcode/cli/plugins/cache/**/zcode-rtl/*/scripts
 ```
 
-(Windows: `C:\Users\<you>\.zcode\cli\plugins\cache\...` — pick the highest version folder.)
-It talks to the ZCode renderer over the Chromium DevTools Protocol on port 9222
-(env `ZCODE_RTL_PORT` overrides). The debug port is **off by default**; the RTL
-layer can be toggled live whenever the port is open.
+(Windows: `C:\Users\<you>\.zcode\cli\plugins\cache\...` — pick the highest
+version folder.) All commands below use `<S>` = that scripts folder.
+The injector talks to the ZCode renderer over the Chromium DevTools Protocol
+on port 9222 (env `ZCODE_RTL_PORT` overrides). The debug port is read by
+Electron only at process start, and the agent runs inside ZCode — therefore
+**never run `restart-zcode.ps1` synchronously from a session** (it kills the
+app and this session). Use the self-detaching cmd scripts, which schedule the
+restart and return immediately.
 
 User arguments: "$ARGUMENTS"
 
-Semantics (pick by the arguments; default when empty or "apply"/"fix" is **on**):
+Pick the branch (default when arguments are empty or say "apply"/"fix" → **on**):
 
 1. **`on`** — enable the RTL layer:
-   - Run: `node "<plugin>/scripts/inject-rtl.mjs" --set on`
-   - If it prints `RTL on: ... -> RTL_ENABLED`, done — Persian is RTL now. No restart happened.
-   - If it prints `PORT_CLOSED`, the debug server is off (the privacy default).
-     Start it with ONE app restart, then re-run `--set on`:
-     `powershell -NoProfile -ExecutionPolicy Bypass -File "<plugin>/scripts/restart-zcode.ps1"`
-     (gracefully closes and relaunches ZCode with `--remote-debugging-port=9222`;
-     the session is restored). After it comes back, re-run `--set on` or wait for
-     the SessionStart hook of the next session.
+   - Run: `node "<S>/inject-rtl.mjs" --set on`
+   - `RTL on: ... -> RTL_ENABLED` → done, no restart happened. Report success.
+   - `PORT_CLOSED` → run: `"<S>/enable-rtl.cmd"` (it returns immediately and
+     schedules: one ZCode restart with the port in ~20s, then auto-enable).
+     Tell the user the app will blink once and RTL comes back on by itself.
 
-2. **`off`** — disable the RTL layer instantly (no app restart):
-   - Run: `node "<plugin>/scripts/inject-rtl.mjs" --set off`
-   - The renderer reloads clean with nothing injected. The debug port stays open.
+2. **`off`** — pause the RTL layer instantly (port stays open):
+   - Run: `node "<S>/inject-rtl.mjs" --set off`
 
-3. **`off hard`** — also close the debug server (back to the full privacy default):
-   - Run `--set off` first, then:
-     `powershell -NoProfile -ExecutionPolicy Bypass -File "<plugin>/scripts/restart-zcode.ps1" -NoPort`
+3. **`off hard`** (or `default`) — full privacy default:
+   - Run: `"<S>/disable-rtl.cmd"` — pauses the layer now and restarts ZCode
+     without the debug port (~20s, detached).
 
-4. **`status`** — run with `--status` and report: port open/closed, page targets.
+4. **`always-on`** (or `boot`) — make every future app start come up with RTL:
+   - Patch the user's own Start Menu shortcut once:
+     ```powershell
+     $sh = New-Object -ComObject WScript.Shell
+     $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\ZCode.lnk"
+     $s = $sh.CreateShortcut($lnk)
+     if ($s.Arguments -notlike '*remote-debugging-port*') { $s.Arguments = ($s.Arguments.Trim() + ' --remote-debugging-port=9222').Trim(); $s.Save() }
+     ```
+   - Then run `"<S>/enable-rtl.cmd"` for the current session. From now on the
+     SessionStart hook injects automatically at every app start.
+   - Undo later with `off hard`.
 
-5. **`eval <js>`** — run with `--eval "<expression>"` and report the printed result.
-   Useful after a ZCode update changed the DOM, e.g.:
+5. **`status`** — run `node "<S>/inject-rtl.mjs" --status` and also
+   `--eval "window.__zcodeRtlProcess ? 'PAYLOAD_ACTIVE' : 'PAYLOAD_ABSENT'"`;
+   report port state, targets, payload and `localStorage['zcodeRtl:enabled']`.
+
+6. **`eval <js>`** — run `node "<S>/inject-rtl.mjs" --eval "<expression>"`
+   and report the printed result. For DOM inspection after an app update, e.g.:
    `--eval "JSON.stringify([...document.querySelectorAll('[class*=message i]')].slice(0,5).map(e=>e.className))"`
-   `--eval "window.__zcodeRtlProcess ? 'PAYLOAD_ACTIVE' : 'PAYLOAD_ABSENT'"`
 
 Notes for the agent:
-- The default bare `/rtl-fix` means **on** (step 1).
-- If the payload threw an exception during `--set on`, the app update changed the
-  DOM: read `assets/zcode-rtl-fix.js` in the same plugin folder, fix the
-  selectors/logic (SKILL.md has the repair playbook and a 3.16.x DOM map), then retry.
+- If `--set on` reports the payload threw an exception, a ZCode update changed
+  the DOM: read `assets/zcode-rtl-fix.js` next to the injector, fix the
+  selectors (SKILL.md has the repair playbook + 3.16.x DOM map), retry.
 - Reply in the user's language (often Persian).
