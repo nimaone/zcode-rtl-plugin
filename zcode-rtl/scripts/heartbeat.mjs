@@ -34,7 +34,6 @@ const INJECT = join(HERE, 'inject-rtl.mjs');
 const CDP = 'http://127.0.0.1:9222';
 const MUTEX_PORT = 9223;
 const TICK_MS = 3000;
-const RESTART_COOLDOWN_MS = 60000;
 const LOGFILE = join(homedir(), '.zcode', 'rtl-heartbeat.log');
 // The Plugin Management toggle writes to the WORKSPACE scope config when a
 // project is open (user-scope only when none) — watch both and AND them,
@@ -132,12 +131,19 @@ function readEnabled() {
   return u !== false; // both unset -> default enabled
 }
 
-function zcodeProcessExists() {
+function zcodeMainProcess() {
+  // Delegates to zcode-main-proc.ps1 (shipped next to this file) so the
+  // WMI query lives in one testable place with zero quoting surprises.
   try {
-    return execSync('tasklist /FI "IMAGENAME eq ZCode.exe" /NH', { windowsHide: true })
-      .toString().includes('ZCode.exe');
+    const out = execSync(
+      `powershell -NoProfile -ExecutionPolicy Bypass -File "${join(HERE, 'zcode-main-proc.ps1')}"`,
+      { windowsHide: true, timeout: 5000 }
+    ).toString();
+    const j = JSON.parse(out);
+    if (!j || !j.ProcessId) return null;
+    return { pid: j.ProcessId, hasFlag: String(j.CommandLine || '').includes('remote-debugging-port') };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -170,6 +176,12 @@ async function pageProbe() {
 
 let lastEnabled = null;
 let lastRestart = 0;
+let restartCount = 0;   // exponential backoff index; resets when healthy
+let noPortStreak = 0;   // persistence guard against racing app startup
+// v0.6.1: repeated restarts were observed killing the app every ~60 s when
+// the app kept coming back without the port (crash/auto-update relaunch).
+// Back off hard instead: 1 min, 5 min, 15 min, 60 min...
+const BACKOFF_STEPS = [60e3, 5 * 60e3, 15 * 60e3, 60 * 60e3];
 
 async function tick() {
   const enabled = readEnabled();
@@ -179,6 +191,8 @@ async function tick() {
   let probe = null;
   try { probe = await pageProbe(); } catch { probe = null; }
   const portOpen = probe !== null;
+  if (portOpen && probe.p) restartCount = 0; // healthy — forget backoff
+  noPortStreak = enabled && !portOpen ? noPortStreak + 1 : 0;
 
   if (portOpen) {
     // Marketplace toggle is the master switch: on an edge it overwrites the
@@ -195,14 +209,21 @@ async function tick() {
       log('toggle on -> injecting RTL layer');
       run(process.execPath, [INJECT, '--set', 'on']);
     }
-  } else if (enabled && Date.now() - lastRestart > RESTART_COOLDOWN_MS && zcodeProcessExists()) {
-    // Toggle is ON but this ZCode instance has no debug port (e.g. first run
-    // after a reboot without the always-on shortcut): restart it once with
-    // the port. Never fires when the user simply quit the app.
-    // Goes through wscript (GUI subsystem) — guaranteed zero windows.
-    log('toggle on but no debug port — restarting ZCode with the port (once, invisibly)');
-    lastRestart = Date.now();
-    run('wscript.exe', [join(HERE, 'rtl-bg.vbs'), 'restart']);
+  } else if (enabled && noPortStreak >= 2) {
+    // Toggle is ON but this ZCode instance has no debug port. Restart at
+    // most with a hard backoff, and ONLY when:
+    //  - a real main app process exists (never launch the app ourselves,
+    //    never mistake a lingering app-server child for the app), and
+    //  - that process does NOT already carry the port flag (if it does, it
+    //    is starting up or broken — wait, do not fight it).
+    const main = zcodeMainProcess();
+    const waitMs = BACKOFF_STEPS[Math.min(restartCount, BACKOFF_STEPS.length - 1)];
+    if (main && !main.hasFlag && Date.now() - lastRestart > waitMs) {
+      log(`toggle on but no debug port — restarting ZCode with the port (backoff attempt ${restartCount + 1}, next in ${waitMs / 60000} min+)`);
+      lastRestart = Date.now();
+      restartCount++;
+      run('wscript.exe', [join(HERE, 'rtl-bg.vbs'), 'restart']);
+    }
   }
 
   lastEnabled = enabled;
