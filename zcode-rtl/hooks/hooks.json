@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "wscript.exe \"${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat-bg.vbs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook-session-start.mjs\"",
             "async": true
           }
         ]
