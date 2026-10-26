@@ -231,6 +231,13 @@ async function tick() {
 
 daemonize().then(() => mutex()).then(async (acquired) => {
   if (!acquired) process.exit(0); // an instance is already watching
+  process.on('uncaughtException', (e) => {
+    log('uncaughtException — exiting:', (e && (e.stack || e.message)) || e);
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (e) => {
+    log('unhandledRejection:', (e && (e.stack || e.message)) || String(e));
+  });
   log(`watching ${CONFIG}${WORKSPACE ? ' + workspace ' + WORKSPACE : ''} (port ${MUTEX_PORT} mutex)`);
   for (;;) {
     try { await tick(); } catch (e) { log('tick error:', e.message || e); }
