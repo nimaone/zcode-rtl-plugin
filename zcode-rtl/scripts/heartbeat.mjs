@@ -21,7 +21,7 @@
  * harmless. Reads config.json every tick; talks CDP only when a transition
  * is needed (all page work is delegated to inject-rtl.mjs).
  */
-import { readFileSync, appendFileSync, statSync, existsSync, truncateSync } from 'node:fs';
+import { readFileSync, appendFileSync, statSync, existsSync, truncateSync, watch } from 'node:fs';
 import { createServer } from 'node:http';
 import { execSync, spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -183,6 +183,14 @@ let noPortStreak = 0;   // persistence guard against racing app startup
 // Back off hard instead: 1 min, 5 min, 15 min, 60 min...
 const BACKOFF_STEPS = [60e3, 5 * 60e3, 15 * 60e3, 60 * 60e3];
 
+let reconciling = false;
+async function reconcile() {
+  if (reconciling) return;
+  reconciling = true;
+  try { await tick(); } catch (e) { log('tick error:', e.message || e); }
+  reconciling = false;
+}
+
 async function tick() {
   const enabled = readEnabled();
   if (enabled === null) return;
@@ -209,13 +217,15 @@ async function tick() {
       log('toggle on -> injecting RTL layer');
       run(process.execPath, [INJECT, '--set', 'on']);
     }
-  } else if (enabled && noPortStreak >= 2) {
+  } else if (enabled && (noPortStreak >= 2 || (edge && enabled))) {
     // Toggle is ON but this ZCode instance has no debug port. Restart at
     // most with a hard backoff, and ONLY when:
     //  - a real main app process exists (never launch the app ourselves,
     //    never mistake a lingering app-server child for the app), and
     //  - that process does NOT already carry the port flag (if it does, it
     //    is starting up or broken — wait, do not fight it).
+    // An explicit toggle edge skips the persistence guard (the user just
+    // asked for it); a no-port boot self-heals on the second reconcile.
     const main = zcodeMainProcess();
     const waitMs = BACKOFF_STEPS[Math.min(restartCount, BACKOFF_STEPS.length - 1)];
     if (main && !main.hasFlag && Date.now() - lastRestart > waitMs) {
@@ -239,8 +249,23 @@ daemonize().then(() => mutex()).then(async (acquired) => {
     log('unhandledRejection:', (e && (e.stack || e.message)) || String(e));
   });
   log(`watching ${CONFIG}${WORKSPACE ? ' + workspace ' + WORKSPACE : ''} (port ${MUTEX_PORT} mutex)`);
-  for (;;) {
-    try { await tick(); } catch (e) { log('tick error:', e.message || e); }
-    await sleep(TICK_MS);
+
+  // v0.6.3 — event-driven instead of a 3 s polling loop (idle cost ~ 0):
+  // react to config changes within ~0.5 s, plus one light safety-net
+  // reconcile per minute (catches renderer reloads and app restarts).
+  let pending = null;
+  const schedule = () => {
+    if (pending) return;
+    pending = setTimeout(() => { pending = null; reconcile(); }, 500);
+  };
+  watch(CONFIG, schedule);
+  if (WORKSPACE) {
+    try { watch(join(WORKSPACE, '.zcode'), schedule); }
+    catch { log('workspace dir watch unavailable:', WORKSPACE); }
   }
+  setInterval(reconcile, 60000);
+  await reconcile();
+  // Boot self-heal: a no-port session gets a second reconcile ~6 s after
+  // start (the 60 s safety net would otherwise be the earliest retry).
+  setTimeout(reconcile, 6000);
 });
