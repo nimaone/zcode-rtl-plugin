@@ -203,13 +203,12 @@ async function tick() {
   noPortStreak = enabled && !portOpen ? noPortStreak + 1 : 0;
 
   if (portOpen) {
-    // Marketplace toggle is the master switch: on an edge it overwrites the
-    // in-page manual switch; between edges the manual switch is respected.
-    if (edge) {
-      run(process.execPath, [INJECT, '--eval',
-        `try{localStorage.setItem('zcodeRtl:enabled','${enabled ? '1' : '0'}')}catch(e){};'SWITCH_SYNCED'`]);
-    }
-    const target = enabled && probe.l !== '0';
+    // Marketplace toggle is the master switch. On an edge the requested
+    // state wins IMMEDIATELY (v0.6.5: no separate localStorage sync spawn —
+    // it raced the probe and delayed the inject by up to a safety-net
+    // period; --set on/off keep the in-page switch in sync themselves).
+    const target = enabled && (edge ? true : probe.l !== '0');
+    if (edge) log(`toggle ${enabled ? 'on' : 'off'} edge`);
     if (probe.p && !target) {
       log('toggle off -> stripping RTL layer live');
       run(process.execPath, [INJECT, '--set', 'off']);
@@ -251,18 +250,24 @@ daemonize().then(() => mutex()).then(async (acquired) => {
   log(`watching ${CONFIG}${WORKSPACE ? ' + workspace ' + WORKSPACE : ''} (port ${MUTEX_PORT} mutex)`);
 
   // v0.6.3 — event-driven instead of a 3 s polling loop (idle cost ~ 0):
-  // react to config changes within ~0.5 s, plus one light safety-net
+  // react to config changes within ~0.15 s, plus one light safety-net
   // reconcile per minute (catches renderer reloads and app restarts).
+  // v0.6.5 — watch DIRECTORIES, not the config files themselves: the app
+  // replaces config.json atomically (write+rename), which silently kills
+  // file watchers. Directory watchers survive; errors are absorbed.
   let pending = null;
   const schedule = () => {
     if (pending) return;
-    pending = setTimeout(() => { pending = null; reconcile(); }, 500);
+    pending = setTimeout(() => { pending = null; reconcile(); }, 150);
   };
-  watch(CONFIG, schedule);
-  if (WORKSPACE) {
-    try { watch(join(WORKSPACE, '.zcode'), schedule); }
-    catch { log('workspace dir watch unavailable:', WORKSPACE); }
-  }
+  const watchDir = (dir) => {
+    try {
+      const w = watch(dir, schedule);
+      w.on('error', () => { /* dir replaced/removed — the 60 s net covers us */ });
+    } catch (e) { log('watch unavailable:', dir, e.message || e); }
+  };
+  watchDir(dirname(CONFIG));
+  if (WORKSPACE) watchDir(join(WORKSPACE, '.zcode'));
   setInterval(reconcile, 60000);
   await reconcile();
   // Boot self-heal: a no-port session gets a second reconcile ~6 s after
