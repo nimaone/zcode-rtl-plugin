@@ -72,17 +72,36 @@ node "<plugin>/scripts/inject-rtl.mjs" --eval "window.__zcodeRtlProcess ? 'ACTIV
 4. Bump `version` in `.zcode-plugin/plugin.json` and refresh the plugin in
    Settings → Plugin Management so the hook uses the new payload.
 
-## 3.16.x DOM map (for future selector repairs)
+## DOM map for future selector repairs (3.16.x → 3.17.x)
+
+**Rule #1: never substring-match the host name.** `"zcode"` literally contains
+`"code"`. On 3.17.1 `<body class="zcode-startup-ready">` and the transcript
+container `[&>[data-zcode-chat-loading-slot]…]:-mt-2` were both caught by the
+payload's `/code/i` className test and by `[class*="code" i]` — `<body>` got
+`direction/text-align/unicode-bidi: ltr/left/embed !important` (and
+`text-align` inherits), while the transcript container took the code branch
+and returned early, so `processEl()` never reached a single Persian `<p>`.
+Symptom: "payload is active, nothing changed". Code classes must be matched
+at TOKEN level (`CODE_TOKEN` in the payload), never as a bare substring.
+Generalize: any class list carrying the app name is unsafe for `[class*=…]`.
 
 - The real sidebar is the `ASIDE` panel with `workspace-sidebar-*` classes.
 - The flex row holding [sidebar | chat] carries an arbitrary Tailwind class
   containing "sidebar" (`[anchor-scope:--sidebar-task-list-divider…]`) —
   never match "sidebar" as a bare substring in `EXCLUDE_SEL`, it swallows
   the whole chat transcript.
-- Tool blocks (terminal/thinking/edit) are shadcn collapsibles:
-  `[data-slot=collapsible]` containing a `.tool-summary` or `.reasoning`
-  marker. The zone root is pinned LTR/left; chrome rows stay LTR; Persian
-  prose inside the body goes through the normal ratio rule (→ RTL).
+- Tool blocks (terminal/thinking/edit) are shadcn collapsibles.
+  - 3.16.x: `[data-slot=collapsible]` containing a `.tool-summary` or
+    `.reasoning` marker.
+  - 3.17.x: both markers were removed — the block chrome is
+    `[data-slot=collapsible-trigger]`, and the body is
+    `[data-slot=collapsible-content]` sitting as a direct child of
+    `.history-message`. `[data-slot=collapsible]` alone is NOT a tool block:
+    sidebar project/task rows use the same slot, so every tool rule is
+    transcript-scoped (`isExcluded` + `inChat`) or the sidebar gets restyled
+    by accident.
+  - Either way: the zone root is pinned LTR/left; chrome rows stay LTR;
+    Persian prose inside the body goes through the normal ratio rule (→ RTL).
 
 ## Notes
 
