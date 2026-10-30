@@ -20,6 +20,11 @@
  * a mutex port; multiple sessions, app restarts and orphaned copies are all
  * harmless. Reads config.json every tick; talks CDP only when a transition
  * is needed (all page work is delegated to inject-rtl.mjs).
+ *
+ * Page work is delegated to the CURRENT install's scripts (resolved from
+ * ~/.zcode/cli/plugins/installed_plugins.json), not to this file's own
+ * folder: the mutex makes this daemon un-replaceable by a plugin refresh, so
+ * a HERE-pinned injector would keep injecting the pre-update payload.
  */
 import { readFileSync, appendFileSync, statSync, existsSync, truncateSync, watch } from 'node:fs';
 import { createServer } from 'node:http';
@@ -30,11 +35,45 @@ import { homedir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CONFIG = join(homedir(), '.zcode', 'cli', 'config.json');
-const INJECT = join(HERE, 'inject-rtl.mjs');
+const PLUGINS_FILE = join(homedir(), '.zcode', 'cli', 'plugins', 'installed_plugins.json');
 const CDP = 'http://127.0.0.1:9222';
 const MUTEX_PORT = 9223;
 const TICK_MS = 3000;
 const LOGFILE = join(homedir(), '.zcode', 'rtl-heartbeat.log');
+
+// This daemon is spawned from whichever cache version folder was current when
+// the SessionStart hook ran, and it holds the mutex port for its whole life —
+// a plugin refresh NEVER replaces it (the new copy loses the mutex race and
+// exits silently). Resolving our scripts from HERE therefore pinned an old
+// payload forever: after the update to 0.6.6 the stale 0.6.5 daemon kept
+// re-injecting the v30 payload on every toggle edge, so RTL looked dead.
+// Page work is delegated to the CURRENT install instead — read from
+// installed_plugins.json and cached on its mtime, falling back to our own
+// folder whenever the file is missing or unreadable.
+let scriptsCache = { mtime: 0, dir: HERE };
+function scriptsDir() {
+  let st;
+  try {
+    st = statSync(PLUGINS_FILE);
+  } catch {
+    return scriptsCache.dir; // no install record: stay on our own folder
+  }
+  if (st.mtimeMs === scriptsCache.mtime) return scriptsCache.dir;
+  scriptsCache.mtime = st.mtimeMs;
+  try {
+    const j = JSON.parse(readFileSync(PLUGINS_FILE, 'utf8'));
+    const rec = (j.plugins || []).find(
+      (p) => p.name === 'zcode-rtl' || String(p.id || '').startsWith('zcode-rtl@')
+    );
+    const dir = rec && rec.installPath && join(rec.installPath, 'scripts');
+    if (dir && existsSync(join(dir, 'inject-rtl.mjs'))) {
+      if (dir !== scriptsCache.dir) log('scripts dir ->', dir);
+      scriptsCache.dir = dir;
+    }
+  } catch { /* keep the last good directory */ }
+  return scriptsCache.dir;
+}
+const scriptPath = (f) => join(scriptsDir(), f);
 // The Plugin Management toggle writes to the WORKSPACE scope config when a
 // project is open (user-scope only when none) — watch both and AND them,
 // matching ZCode's own resolution (any scope saying false wins).
@@ -211,10 +250,10 @@ async function tick() {
     if (edge) log(`toggle ${enabled ? 'on' : 'off'} edge`);
     if (probe.p && !target) {
       log('toggle off -> stripping RTL layer live');
-      run(process.execPath, [INJECT, '--set', 'off']);
+      run(process.execPath, [scriptPath('inject-rtl.mjs'), '--set', 'off']);
     } else if (!probe.p && target) {
       log('toggle on -> injecting RTL layer');
-      run(process.execPath, [INJECT, '--set', 'on']);
+      run(process.execPath, [scriptPath('inject-rtl.mjs'), '--set', 'on']);
     }
   } else if (enabled && (noPortStreak >= 2 || (edge && enabled))) {
     // Toggle is ON but this ZCode instance has no debug port. Restart at
@@ -231,7 +270,7 @@ async function tick() {
       log(`toggle on but no debug port — restarting ZCode with the port (backoff attempt ${restartCount + 1}, next in ${waitMs / 60000} min+)`);
       lastRestart = Date.now();
       restartCount++;
-      run('wscript.exe', [join(HERE, 'rtl-bg.vbs'), 'restart']);
+      run('wscript.exe', [scriptPath('rtl-bg.vbs'), 'restart']);
     }
   }
 

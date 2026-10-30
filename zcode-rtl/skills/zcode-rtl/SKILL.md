@@ -72,6 +72,46 @@ node "<plugin>/scripts/inject-rtl.mjs" --eval "window.__zcodeRtlProcess ? 'ACTIV
 4. Bump `version` in `.zcode-plugin/plugin.json` and refresh the plugin in
    Settings → Plugin Management so the hook uses the new payload.
 
+## If RTL stays broken right after a plugin refresh (stale daemon)
+
+The heartbeat is a long-lived detached singleton spawned from **whichever
+cache version folder was current at that moment**
+(`~/.zcode/cli/plugins/cache/zcode-rtl-plugin/zcode-rtl/<ver>/scripts`), and
+it holds mutex port **9223 for its whole life**. Consequences:
+
+- A plugin refresh does NOT replace it: the freshly spawned copy loses the
+  mutex race and exits silently (`if (!acquired) process.exit(0)`), so a new
+  session cannot fix it either. Restarting ZCode does not help either — the
+  daemon lives outside the app's process tree.
+- Before v0.6.7 the daemon delegated page work to
+  `join(HERE, 'inject-rtl.mjs')`, so it kept injecting the **pre-update
+  payload**. Symptom: the cache has the new version and the new payload, the
+  log keeps printing `toggle on -> injecting RTL layer`, yet the page still
+  shows the OLD payload's signature (e.g. `unicode-bidi: embed` on `<body>`).
+
+Recognize it with two checks:
+
+- Which version folder does the LIVE daemon run from? Compare
+  `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` (CommandLine)
+  against `installPath` in `~/.zcode/cli/plugins/installed_plugins.json`.
+- Has any daemon re-bound the mutex since the refresh? `tail
+  ~/.zcode/rtl-heartbeat.log` — no new `watching …` line after the record's
+  `updatedAt` means the stale one is still in charge.
+
+Recover:
+
+1. `--set off` (strips cleanly; writes `localStorage = 0`)
+2. `taskkill /PID <stale-daemon> /F` to free port 9223
+3. spawn `<newest>/scripts/heartbeat.mjs --daemon --workspace <active project>`
+4. `--set on` — and use the **installed** copy for it, not the repo checkout:
+   the daemon and the hook both work from the cache.
+
+v0.6.7 removes the whole class of bug: `heartbeat.mjs` now resolves its
+`scripts/` directory from `installed_plugins.json → installPath`
+(mtime-cached, falls back to its own folder), so even a stale daemon injects
+the currently installed payload, and a refresh takes effect without killing
+anything.
+
 ## DOM map for future selector repairs (3.16.x → 3.17.x)
 
 **Rule #1: never substring-match the host name.** `"zcode"` literally contains
