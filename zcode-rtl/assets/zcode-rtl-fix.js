@@ -1,5 +1,21 @@
 /*
- * ZCode RTL fix v31 — Persian RTL, English/code/tool blocks LTR.
+ * ZCode RTL fix v32 — Persian RTL, English/code/tool blocks LTR.
+ *
+ * v32 (user report: fully-English paragraphs stuck RTL mid-conversation):
+ *   The isPureLatin branch RETURNED, pruning the walk at every pure-Latin
+ *   container. A descendant still carrying a stale inline rtl (styled while
+ *   its text streamed as Persian, or after React reused the DOM node) was
+ *   never revisited: live confirmation on 0.6.7 showed "Sources:", file
+ *   paths and list items frozen rtl/right inside English-only sections.
+ *   The branch now forces LTR and KEEPS DESCENDING, so every later pass
+ *   (~200 ms after any mutation) re-evaluates the subtree and heals stale
+ *   styles. Table priority is untouched — the inTable branch still runs
+ *   first, so Latin cells of RTL tables stay right-aligned.
+ *   Companion fix in 0.6.8: restart-zcode.ps1 re-adds the debug-port flag
+ *   to every ZCode shortcut it can write after a restart (app updates
+ *   rewrite shortcuts and silently drop the flag — taskbar search and the
+ *   desktop then booted without the port and needed a heartbeat restart
+ *   every time).
  *
  * v31 (ZCode 3.17.1 — "the fix stopped working after the update"):
  *   ROOT CAUSE: the host app's own name contains the substring "code".
@@ -129,7 +145,7 @@
  *   - sidebar (#sidebar, *sidebar*) -> COMPLETELY UNTOUCHED
  *   - debounced 200 ms rescan after streaming mutations
  */
-(function zcodeRtlFixV31() {
+(function zcodeRtlFixV32() {
   // Every element+property we set, so disable() can strip them without a
   // page reload (v30).
   const TOUCHED = new Map();
@@ -378,20 +394,26 @@
     const inTable = !isLayout && el.closest && el.closest('table,[class*="table" i]');
     if (inTable && !hasBlockChild(el)) {
       force(el, RTL_TABLE);
-    } else {
-      if (isPureLatin(text)) { force(el, LTR_TEXT); return; }
-      if (tag === 'ul' || tag === 'ol') {
-        // Reached only when NOT pure-Latin -> Persian/mixed list goes RTL so
-        // CSS-generated markers/numbers land on the right.
-        force(el, RTL_LIST);
-      } else if (tag === 'li') {
-        force(el, RTL_FORCE);
-      } else if (!isLayout) {
-        // Core rule, v25 edition: RTL by RATIO (>=20% Persian letters) —
-        // but NEVER on an element that contains the sidebar (layout wrapper):
-        // flipping those reorders the whole app layout.
-        force(el, (isPersianDominant(text) && !containsExcluded(el)) ? RTL_FORCE : NEUTRAL);
-      }
+    } else if (isPureLatin(text)) {
+      // v32: NO early return any more. The old `return` pruned the walk at
+      // every pure-Latin container, so a descendant still carrying a stale
+      // inline rtl (styled while its text streamed as Persian, or after
+      // React reused the DOM node) was never revisited — fully-English
+      // paragraphs frozen RTL mid-conversation (live-confirmed on 0.6.7).
+      // Force LTR and KEEP DESCENDING: the next pass (~200 ms after any
+      // mutation) re-evaluates the subtree and heals stale styles.
+      force(el, LTR_TEXT);
+    } else if (tag === 'ul' || tag === 'ol') {
+      // Persian/mixed list goes RTL so CSS-generated markers/numbers land
+      // on the right.
+      force(el, RTL_LIST);
+    } else if (tag === 'li') {
+      force(el, RTL_FORCE);
+    } else if (!isLayout) {
+      // Core rule, v25 edition: RTL by RATIO (>=20% Persian letters) —
+      // but NEVER on an element that contains the sidebar (layout wrapper):
+      // flipping those reorders the whole app layout.
+      force(el, (isPersianDominant(text) && !containsExcluded(el)) ? RTL_FORCE : NEUTRAL);
     }
 
     const kids = el.children;
@@ -604,7 +626,7 @@
       window.__zcodeRtlObserver = obs;
     }
 
-    console.log('[ZCode RTL v31] applied. Persian RTL; tool-block chrome LTR with Persian prose RTL inside; sidebar untouched. Toggle is reload-free both ways.');
+    console.log('[ZCode RTL v32] applied. Persian RTL; tool-block chrome LTR with Persian prose RTL inside; sidebar untouched. Toggle is reload-free both ways.');
   }
 
   // v29: persistent on/off switch. '0' in localStorage disables the layer.
@@ -632,17 +654,17 @@
     try { localStorage.setItem(LS_KEY, v ? '1' : '0'); } catch (e) { /* storage blocked */ }
     if (v) {
       if (!window.__zcodeRtlObserver) start();
-      console.log('[ZCode RTL v31] enabled.');
+      console.log('[ZCode RTL v32] enabled.');
     } else {
       try { stripAll(); } catch (e) { /* nothing touched */ }
       stopObserver();
       window.__zcodeRtlProcess = null;
-      console.log('[ZCode RTL v31] disabled — styles stripped, no reload.');
+      console.log('[ZCode RTL v32] disabled — styles stripped, no reload.');
     }
   };
 
   if (!rtlEnabled()) {
-    console.log('[ZCode RTL v31] disabled (localStorage zcodeRtl:enabled=0). Enable with window.__zcodeRtlSetEnabled(true) or /rtl-fix on.');
+    console.log('[ZCode RTL v32] disabled (localStorage zcodeRtl:enabled=0). Enable with window.__zcodeRtlSetEnabled(true) or /rtl-fix on.');
     return;
   }
 

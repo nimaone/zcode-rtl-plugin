@@ -1,5 +1,5 @@
 ---
-description: Toggle or diagnose the Persian RTL layer in the ZCode chat UI (on/off live, always-on boot mode, status, eval)
+description: Toggle or diagnose the Persian RTL layer in the ZCode chat UI (on/off live, always-on boot mode, status, eval, shortcut repair)
 ---
 
 Control the Persian RTL layer of the ZCode Desktop chat UI.
@@ -56,8 +56,10 @@ Pick the branch (default when arguments are empty or say "apply"/"fix" → **on*
      $s = $sh.CreateShortcut($lnk)
      if ($s.Arguments -notlike '*remote-debugging-port*') { $s.Arguments = ($s.Arguments.Trim() + ' --remote-debugging-port=9222').Trim(); $s.Save() }
      ```
-   - Then run `"<S>/enable-rtl.cmd"` for the current session. From now on the
-     SessionStart hook injects automatically at every app start.
+   - For the current session run `node "<S>/inject-rtl.mjs" --set on`; after
+     that the SessionStart hook injects automatically at every app start.
+     Machine-scope launch paths (taskbar search, desktop) should carry the
+     flag too — run branch `shortcuts` once.
    - Undo later with `off hard`.
 
 5. **`status`** — run `node "<S>/inject-rtl.mjs" --status` and also
@@ -67,6 +69,17 @@ Pick the branch (default when arguments are empty or say "apply"/"fix" → **on*
 6. **`eval <js>`** — run `node "<S>/inject-rtl.mjs" --eval "<expression>"`
    and report the printed result. For DOM inspection after an app update, e.g.:
    `--eval "JSON.stringify([...document.querySelectorAll('[class*=message i]')].slice(0,5).map(e=>e.className))"`
+
+7. **`shortcuts`** — repair the launch shortcuts so every app start (desktop,
+   Start Menu, taskbar search) opens the debug port from process start and no
+   heartbeat restart is needed:
+   - Run: `powershell -NoProfile -ExecutionPolicy Bypass -File "<S>/fix-shortcuts.ps1"`
+     From a normal shell the user-scope shortcuts are fixed; machine-scope
+     ones (ProgramData, Public Desktop) report DENIED. For a full repair run
+     it elevated and tell the user a UAC prompt will appear.
+   - Report the ok/patched/DENIED lines. `restart-zcode.ps1` repeats this
+     repair best-effort after every restart, so the elevated run is needed
+     only once per machine (and again after an app update rewrites shortcuts).
 
 Notes for the agent:
 - If `--set on` reports the payload threw an exception, a ZCode update changed

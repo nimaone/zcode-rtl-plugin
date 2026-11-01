@@ -46,3 +46,34 @@ if (Get-Process ZCode -ErrorAction SilentlyContinue) {
 $arg = if ($NoPort) { "" } else { "--remote-debugging-port=$port" }
 Start-Process -FilePath $ZCodeExe -ArgumentList $arg
 Write-Host ("ZCode restarted " + $(if ($NoPort) { "WITHOUT" } else { "WITH" }) + " the debug port ($port).")
+
+# v0.6.8 — self-repair the launch shortcuts. App updates rewrite the .lnk
+# files and silently drop --remote-debugging-port, which is why some launch
+# paths (taskbar search, desktop) came up WITHOUT the port and needed one
+# heartbeat restart every single time. Re-add the flag to every ZCode
+# shortcut we can write — user-scope locations succeed from a normal shell,
+# machine-scope (ProgramData / Public Desktop) need elevation and are
+# skipped silently on failure. Only when restarting WITH the port: a
+# -NoPort restart is the privacy path and must not re-flag anything.
+if (-not $NoPort) {
+  $sh = New-Object -ComObject WScript.Shell
+  $roots = @(
+    "$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
+    "$env:ProgramData\Microsoft\Windows\Start Menu\Programs",
+    "$env:USERPROFILE\Desktop",
+    "$env:PUBLIC\Desktop"
+  )
+  foreach ($root in $roots) {
+    Get-ChildItem -Path $root -Recurse -Filter "*.lnk" -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -like "*zcode*" } |
+      ForEach-Object {
+        try {
+          $l = $sh.CreateShortcut($_.FullName)
+          if ($l.TargetPath -match 'ZCode\.exe$' -and $l.Arguments -notmatch 'remote-debugging-port') {
+            $l.Arguments = (($l.Arguments + " --remote-debugging-port=$port").Trim())
+            $l.Save()
+          }
+        } catch { }  # machine-scope without elevation: skip silently
+      }
+  }
+}
