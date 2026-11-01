@@ -1,5 +1,22 @@
 /*
- * ZCode RTL fix v32 — Persian RTL, English/code/tool blocks LTR.
+ * ZCode RTL fix v33 — Persian RTL, English/code/tool blocks LTR.
+ *
+ * v33 (user report: the email-draft fenced block and the Sources paragraph
+ *   below it rendered RTL in the live chat):
+ *   REAL ROOT CAUSE — the v22 table-scope selector [class*="table" i] is a
+ *   substring match, and the 3.17.1 transcript scroll pane itself carries
+ *   [--markdown-table-layout-left-inset:16px] / …right-inset… utilities.
+ *   "table" is a substring of those, so el.closest('[class*="table" i]')
+ *   matched for EVERY element in the chat: every near-leaf (English
+ *   paragraphs, fenced code blocks — 3.17.x renders them without <pre> —
+ *   mono badges like "text"/"0.8s") took the RTL_TABLE branch
+ *   (rtl/right/embed). Persian content looked correct only because
+ *   RTL_TABLE ≈ RTL_FORCE, which masked the bug. v32's stale-style freeze
+ *   was real but secondary; this is the actual reported defect.
+ *   FIX: inTableScope() requires "table" as a real class TOKEN and strips
+ *   bracketed arbitrary variants first; real <table> markup always counts.
+ *   (v32's isPureLatin de-pruning is kept — it heals genuinely stale
+ *   styles, live-confirmed.)
  *
  * v32 (user report: fully-English paragraphs stuck RTL mid-conversation):
  *   The isPureLatin branch RETURNED, pruning the walk at every pure-Latin
@@ -145,7 +162,7 @@
  *   - sidebar (#sidebar, *sidebar*) -> COMPLETELY UNTOUCHED
  *   - debounced 200 ms rescan after streaming mutations
  */
-(function zcodeRtlFixV32() {
+(function zcodeRtlFixV33() {
   // Every element+property we set, so disable() can strip them without a
   // page reload (v30).
   const TOUCHED = new Map();
@@ -216,6 +233,27 @@
     if (t === 'pre' || t === 'code') return true;
     const cls = typeof el.className === 'string' ? el.className : '';
     return CODE_TOKEN.test(cls);
+  }
+
+  // v33: TOKEN-level table-scope detection. "table" must be a real class
+  // token (Tailwind display utilities table/table-row/table-cell, names
+  // like data-table-wrap) — NOT a substring. Arbitrary Tailwind variants in
+  // [...] brackets are stripped first: the 3.17.1 transcript scroll pane
+  // carries [--markdown-table-layout-*] CSS-variable utilities, so the old
+  // [class*="table" i] matched the pane itself and put EVERY leaf of every
+  // message inside a phantom table scope → RTL_TABLE (rtl/right/embed) on
+  // all-English paragraphs, fenced code blocks (3.17.x renders them without
+  // <pre>) and mono badges. Real <table> markup always counts.
+  const TABLE_TOKEN = /(?:^|[\s:._/,-])table(?:$|[\s:._/,-])/i;
+  function inTableScope(el) {
+    if (!el.closest) return false;
+    if (el.closest('table')) return true;
+    for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+      const cls = typeof n.className === 'string' ? n.className : '';
+      if (!cls || !/table/i.test(cls)) continue;
+      if (TABLE_TOKEN.test(cls.replace(/\[[^\]]*\]/g, ' '))) return true;
+    }
+    return false;
   }
 
   // Tool blocks (terminal / thinking / edit): the block CHROME (summary
@@ -391,7 +429,13 @@
     // the <td> branch never fires. Apply the same per-cell rule to any
     // near-leaf element inside a table scope — again BEFORE the pure-Latin
     // check, so Latin-valued pseudo-cells stay right-aligned like real ones.
-    const inTable = !isLayout && el.closest && el.closest('table,[class*="table" i]');
+    // v33: table-scope detection is TOKEN-level and bracket-aware — the old
+    // [class*="table" i] substring matched the 3.17.1 transcript scroll pane
+    // ITSELF ([--markdown-table-layout-*] CSS-variable utilities contain
+    // "table"), so every leaf of every message (English paragraphs, fenced
+    // code blocks — 3.17.x renders them without <pre> — mono badges) took
+    // the RTL_TABLE branch: rtl/right/embed on all-English content.
+    const inTable = !isLayout && inTableScope(el);
     if (inTable && !hasBlockChild(el)) {
       force(el, RTL_TABLE);
     } else if (isPureLatin(text)) {
@@ -626,7 +670,7 @@
       window.__zcodeRtlObserver = obs;
     }
 
-    console.log('[ZCode RTL v32] applied. Persian RTL; tool-block chrome LTR with Persian prose RTL inside; sidebar untouched. Toggle is reload-free both ways.');
+    console.log('[ZCode RTL v33] applied. Persian RTL; tool-block chrome LTR with Persian prose RTL inside; sidebar untouched. Toggle is reload-free both ways.');
   }
 
   // v29: persistent on/off switch. '0' in localStorage disables the layer.
@@ -654,17 +698,17 @@
     try { localStorage.setItem(LS_KEY, v ? '1' : '0'); } catch (e) { /* storage blocked */ }
     if (v) {
       if (!window.__zcodeRtlObserver) start();
-      console.log('[ZCode RTL v32] enabled.');
+      console.log('[ZCode RTL v33] enabled.');
     } else {
       try { stripAll(); } catch (e) { /* nothing touched */ }
       stopObserver();
       window.__zcodeRtlProcess = null;
-      console.log('[ZCode RTL v32] disabled — styles stripped, no reload.');
+      console.log('[ZCode RTL v33] disabled — styles stripped, no reload.');
     }
   };
 
   if (!rtlEnabled()) {
-    console.log('[ZCode RTL v32] disabled (localStorage zcodeRtl:enabled=0). Enable with window.__zcodeRtlSetEnabled(true) or /rtl-fix on.');
+    console.log('[ZCode RTL v33] disabled (localStorage zcodeRtl:enabled=0). Enable with window.__zcodeRtlSetEnabled(true) or /rtl-fix on.');
     return;
   }
 
